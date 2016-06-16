@@ -5,8 +5,8 @@ use std::env;  //to get command line arguments
 
   extern {
       fn createANDbind(req: libc::c_int) -> libc::c_int;
-      fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
       fn listen(socket: c_int, backlog: c_int) -> c_int;
+      fn makeSOCKETnonblocking(sfd: i32) -> i32;
     // pub fn epoll_create1(flags: u32) -> libc::c_int;
     //  pub fn epoll_ctl(epfd: c_int, op: u32, fd: i32, event: *const epoll_event) -> i32;
     //  pub fn epoll_wait(epfd: libc::c_int, events:*const epoll_event, maxevents: libc::c_int, timeout: libc::c_int) -> libc::c_int;
@@ -43,20 +43,18 @@ fn main(){
     
     let mut socket = unsafe {   createANDbind(req)  }; //call to function defined in c (to create and build socket)
 
-    if socket!=-1 {   //if socket not generated
     println!("new socket is: {}",socket);
+    if socket!=-1 {   //if socket not generated
     }
 
-    let mut s = makeSOCKETnonblocking(socket);
+    let mut s = unsafe{  makeSOCKETnonblocking(socket)  };
     if s==-1 {println!("error while non-blocking the socket"); }
 
     s= unsafe { listen(socket,SOMAXCONN)};   //listen on socket with maximum length SOMAXCONN(120)
     if s==-1 {println!("error while non-blocking the socket"); }
     println!("s:{}",s);
-    // println!("s:{}",s);
-//      let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
-     
-//      let fd = 0;
+  
+ //    let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
     
 //      let  event=&epoll_event { events: EPOLLIN |EPOLLET, data : epoll_data{ fd :fd,U32: 0,U64:0 }};
               
@@ -77,12 +75,5 @@ fn main(){
 //     // `file` goes out of scope, and the "hello.txt" file gets closed
 // }
 }    
-   
-fn makeSOCKETnonblocking(sfd: i32) -> i32{  //function to makee socket non-blocking
-  let mut flags = unsafe {  fcntl(sfd,F_GETFL,0) };
-  if flags==-1{ return -1 }
-  flags = flags | O_NONBLOCK;
-  let mut s = unsafe { fcntl(sfd,F_SETFL,flags) };
-  if s==-1{ return -1 }
-  return 0; 
-}   
+
+
