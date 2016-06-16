@@ -7,9 +7,9 @@ use std::env;  //to get command line arguments
       fn createANDbind(req: libc::c_int) -> libc::c_int;
       fn listen(socket: c_int, backlog: c_int) -> c_int;
       fn makeSOCKETnonblocking(sfd: i32) -> i32;
-    // pub fn epoll_create1(flags: u32) -> libc::c_int;
-    //  pub fn epoll_ctl(epfd: c_int, op: u32, fd: i32, event: *const epoll_event) -> i32;
-    //  pub fn epoll_wait(epfd: libc::c_int, events:*const epoll_event, maxevents: libc::c_int, timeout: libc::c_int) -> libc::c_int;
+      pub fn epoll_create1(flags: u32) -> libc::c_int;
+      pub fn epoll_ctl(epfd: c_int, op: u32, fd: i32, event: *const epoll_event) -> i32;
+      pub fn epoll_wait(epfd: libc::c_int, events:*const epoll_event, maxevents: libc::c_int, timeout: libc::c_int) -> libc::c_int;
 
   }
 
@@ -48,32 +48,34 @@ fn main(){
     }
 
     let mut s = unsafe{  makeSOCKETnonblocking(socket)  };
-    if s==-1 {println!("error while non-blocking the socket"); }
+    if s==-1 {  panic!("error while non-blocking the socket"); }
 
     s= unsafe { listen(socket,SOMAXCONN)};   //listen on socket with maximum length SOMAXCONN(120)
-    if s==-1 {println!("error while non-blocking the socket"); }
+    if s==-1 { panic!("error while non-blocking the socket"); }
     println!("s:{}",s);
   
- //    let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
-    
-//      let  event=&epoll_event { events: EPOLLIN |EPOLLET, data : epoll_data{ fd :fd,U32: 0,U64:0 }};
+    let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
+    if epfd == -1 { panic!("epoll instance creation error"); }
+
+    let  event=&epoll_event { events: EPOLLIN |EPOLLET, data : epoll_data{ fd :socket,U32: 0,U64:0 }};
               
-//      let s = unsafe {
-//                 epoll_ctl(epfd, EPOLL_CTL_ADD, fd,event)  //to add file descriptor to epoll instance
-//                    };
-//       let mut events = &epoll_event { events: EPOLLIN | EPOLLET, data : epoll_data{ fd :0,U32: 0,U64:0 }};     
-//       let mut x=0;
-//     while true {
-//       println!("start loop");
+    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket,event)  //to add file descriptor to epoll instance
+                   };
+    if epfd == -1 { panic!("error while adding fd(socket) to epoll instance "); }
+
+    let mut events = &epoll_event { events: EPOLLIN | EPOLLET, data : epoll_data{ fd :0,U32: 0,U64:0 }};     
+      // let mut x=0;
+    while true {
+      // println!("start loop");
        
-//       let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
+      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
        
-//        if n==0 {println!("timeout"); continue;}
-//         if events.data.fd==fd  // We have a notification on the listening socket, which  means one or more incoming connections. 
-//        { println!("something happened"); break;
-//         }
-//     // `file` goes out of scope, and the "hello.txt" file gets closed
-// }
+       if n==0 {println!("timeout"); continue;}
+        if events.data.fd==socket  // We have a notification on the listening socket, which  means one or more incoming connections. 
+       { println!("something happened"); break;
+        }
+    // `file` goes out of scope, and the "hello.txt" file gets closed
+}
 }    
 
 
