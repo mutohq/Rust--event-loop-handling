@@ -1,0 +1,12 @@
+[package]
+name = "eventloop"
+version = "0.1.0"
+authors = ["anil1596 <anil.khadwal@gmail.com>"]
+
+build = "build.rs"
+
+[dependencies]
+mio = "0.4.1"
+libc = "0.2"
+[build-dependencies]
+gcc="0.3.0"
