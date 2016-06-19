@@ -1,7 +1,5 @@
-
-
 /*
-	C ECHO client example using sockets
+ C code to check parent connection	
 */
 #include<stdio.h>	//printf
 #include<string.h>	//strlen
