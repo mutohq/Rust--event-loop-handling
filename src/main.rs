@@ -24,15 +24,15 @@ pub const F_SETFL: c_int = 4;
 pub const SOMAXCONN: c_int = 120;
  
 // epoll structures to support functioning of FFI
- pub struct epoll_data {
-    //  ptr: libc::c_void ,
-     fd:   c_int,
-     U32:  c_int,
-     U64:  u64    
-   } 
+//  pub struct epoll_data {
+//     //  ptr: libc::c_void ,
+//      fd:   c_int,
+//      U32:  c_int,
+//      U64:  u64    
+//    } 
  pub struct epoll_event {
     pub events: u32,
-    pub data: epoll_data
+    pub fd: i32
    } 
 
 fn main(){  
@@ -57,22 +57,28 @@ fn main(){
     let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
     if epfd == -1 { panic!("epoll instance creation error"); }
 
-    let  event=&epoll_event { events: EPOLLIN |EPOLLET, data : epoll_data{ fd :socket,U32: 0,U64:0 }};
+    let  event=&epoll_event { events: EPOLLIN |EPOLLET,fd :socket};
               
     s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket,event)  //to add file descriptor to epoll instance
                    };
     if epfd == -1 { panic!("error while adding fd(socket) to epoll instance "); }
 
-    let mut events = &epoll_event { events: EPOLLIN | EPOLLET, data : epoll_data{ fd :0,U32: 0,U64:0 }};     
+    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD,0,event)  //to add file descriptor to epoll instance
+                   };
+    if epfd == -1 { panic!("error while adding fd(socket) to epoll instance "); }
+
+    let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket};     
       // let mut x=0;
     while true {
-      // println!("start loop");
+      println!("start loop");
        
-      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
+      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,6000) };
        
        if n==0 {println!("timeout"); continue;}
-        if events.data.fd==socket  // We have a notification on the listening socket, which  means one or more incoming connections. 
-       { println!("something happened"); break;
+       if n==-1 {println!("some error occured"); break;}
+       println!("n:{},fd:{}",n,events.fd);
+        if events.fd==socket  // We have a notification on the listening socket, which  means one or more incoming connections. 
+       { println!("something happened"); 
         }
     // `file` goes out of scope, and the "hello.txt" file gets closed
 }
