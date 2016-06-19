@@ -1,6 +1,5 @@
-/*
- C code to check parent connection	
-*/
+// C code to check parent connection	
+
 #include<stdio.h>	//printf
 #include<string.h>	//strlen
 #include<sys/socket.h>	//socket
