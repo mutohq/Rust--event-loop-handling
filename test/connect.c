@@ -33,9 +33,9 @@ int main(int argc , char *argv[])
 	puts("Connected\n");
 	
 	//keep communicating with server
-	while(1)
-	{
-		printf("Enter message : ");
+	//while(1)
+	//{
+		printf("Enter something !!!  ");
 		scanf("%s" , message);
 		
 		//Send some data
@@ -45,7 +45,7 @@ int main(int argc , char *argv[])
 			return 1;
 		}
 		
-	}
+	//}
 	
 	close(sock);
 	return 0;

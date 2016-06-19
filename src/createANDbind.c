@@ -3,7 +3,7 @@
 #include <sys/socket.h> //for socket(),bind()
 #include <netdb.h>  //for getaddrinfo
 #include <stdio.h>
-#include <string.h>
+
 int createANDbind(int iport)
   {
   // printf("in c :%d",iport);
