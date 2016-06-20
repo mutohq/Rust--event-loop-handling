@@ -4,7 +4,7 @@
 #include<string.h>	//strlen
 #include<sys/socket.h>	//socket
 #include<arpa/inet.h>	//inet_addr
-
+#include<stdlib.h>
 int main(int argc , char *argv[])
 {
 	int sock;
@@ -19,12 +19,14 @@ int main(int argc , char *argv[])
 	}
 	puts("Socket created");
 	
-	server.sin_addr.s_addr = inet_addr("0.0.0.0");
+	server.sin_addr.s_addr = inet_addr(argv[1]);
 	server.sin_family = AF_INET;
-	server.sin_port = htons( 45612 );
+	int port = atoi(argv[2]);
+    printf("port :%d",port);
+    server.sin_port = htons( port );
 
 	//Connect to remote server
-	if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0)
+	    if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0)
 	{
 		perror("connect failed. Error");
 		return 1;
