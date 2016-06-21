@@ -9,14 +9,18 @@ int createANDbind(int iport)
   // printf("in c :%d",iport);
   struct addrinfo hints;
   struct addrinfo *result, *rp;
-  int s, sfd;    char  *port;   
-  sprintf( port, "%d", iport ); //to convert int char*
+  int s, sfd;    char  *port;  
+   //to convert int char* 
+  sprintf( port, "%d", iport );
   memset (&hints, 0, sizeof (struct addrinfo));  
   hints.ai_family = AF_UNSPEC;     /* Return IPv4 and IPv6 choices */
   hints.ai_socktype = SOCK_STREAM; /* We want a TCP socket */
   hints.ai_flags = AI_PASSIVE;     /* All interfaces */
   // printf(" port:%s\n",port);
   
+  /* The hints argument points to an addrinfo structure that specifies
+     criteria for selecting the socket address structures returned in the
+      list pointed to by res */
   s = getaddrinfo (NULL, port, &hints, &result);
   
   if (s != 0)
@@ -27,11 +31,16 @@ int createANDbind(int iport)
  
   for (rp = result; rp != NULL; rp = rp->ai_next)
     { 
+      /*socket() creates an endpoint for communication and returns a file
+       descriptor that refers to that endpoint.*/
       sfd = socket (rp->ai_family, rp->ai_socktype, rp->ai_protocol);
   
       if (sfd == -1)
         continue;
-  
+    /* bind() assigns
+       the address specified by addr to the socket referred to by the file
+       descriptor sockfd.*/
+       
       s = bind (sfd, rp->ai_addr, rp->ai_addrlen);
       
       if (s == 0)
