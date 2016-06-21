@@ -2,6 +2,9 @@ extern crate libc;
 use libc::c_int;
 use std::error::Error;
 use std::env;  //to get command line arguments
+use std::os::unix::io::AsRawFd;
+use std::net::{TcpListener,TcpStream};
+//use std::os::unix::io::AsRawFd;
 
 //flags of libc
 pub const EPOLL_CTL_ADD: u32 = 1;
@@ -15,13 +18,10 @@ pub const SOMAXCONN: c_int = 120;
 
 //external functions of library(libc) and other c files
 extern {
-      fn createANDbind(req: libc::c_int) -> libc::c_int;
-      fn listen(socket_fd: c_int, backlog: c_int) -> c_int;
-      fn makeSOCKETnonblocking(sfd: i32) -> i32;
       pub fn epoll_create1(flags: u32) -> libc::c_int;
       pub fn epoll_ctl(epfd: c_int, op: u32, fd: i32, event: *const epoll_event) -> i32;
       pub fn epoll_wait(epfd: libc::c_int, events:*const epoll_event, maxevents: libc::c_int, timeout: libc::c_int) -> libc::c_int;
-      fn connection(socket_fd: i32) -> i32;
+     
   }
 
  //structure to represent epoll_events
@@ -31,30 +31,22 @@ extern {
    } 
 
 fn main(){  
-    let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
-
-    println!("");    
-    let mut req: i32 = args[1].trim().parse().expect("Please type a number!");
+    // let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
+    // let host = args[1];
+    // println!("");    
+    // let mut port: i32 = args[2].trim().parse().expect("Please type a number!");
     
-    let mut socket_fd = unsafe {   createANDbind(req)  }; //call to function defined in c (to create and build socket_fd)
-
-    println!("Your listening socket_fd is: {}",socket_fd);
-    if socket_fd!=-1 {   //if socket_fd not generated
-    }
-
-    let mut s = unsafe{  makeSOCKETnonblocking(socket_fd)  };
-    if s==-1 {  panic!("error while non-blocking the socket_fd"); }
-
-    s= unsafe { listen(socket_fd,SOMAXCONN)};   //start listen on socket_fd with maximum length SOMAXCONN(120)
-    if s==-1 { panic!("error while non-blocking the socket_fd"); }
-    // println!("s:{}",s);
+    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    
+    let socket_fd = listener.as_raw_fd();
+    println!("socket_fd:{}",socket_fd);
   
     let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
     if epfd == -1 { panic!("epoll instance creation error"); }
 
     let mut event=&epoll_event { events: EPOLLIN |EPOLLET,fd :socket_fd};
               
-    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd,event)  //to add file descriptor to epoll instance
+    let mut s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd,event)  //to add file descriptor to epoll instance
                    };
     if s == -1 { panic!("error while adding fd(socket_fd) to epoll instance "); }
 
@@ -68,7 +60,7 @@ fn main(){
 
     let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket_fd};     
 
-//      >=<      ...Here begins the EVENTLOOP...   >=<
+// //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
       //println!("start loop");
        
@@ -87,30 +79,21 @@ fn main(){
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
                while true
                 {
-                 let infd = unsafe {connection(socket_fd) };
-                  if infd==-1
-                     { 
-                       //println!("processed all incoming connections");
-                        break;
-                      }
-                  //make new conection non-blocking    
-                  let mut s = unsafe { makeSOCKETnonblocking(infd) };
-                  if s==-1 {  panic!("error while non-blocking the socket_fd"); }
-                  //initialising struct for new conections
-                  let mut event = &epoll_event { events: EPOLLIN |EPOLLET,fd :infd};
-                  //adding new connection's fd (infd) to epoll_instance (epfd) 
-                  println!("infd:{}",infd);
-                  s = unsafe {  epoll_ctl(epfd, EPOLL_CTL_ADD,infd,eventc) } ;
-                  if epfd == -1 { panic!("error  adding new fd to epoll instance"); }
-
+                //  if s==-1 {  panic!("error while non-blocking the socket_fd"); }
+                //   //initialising struct for new conections
+                //   let mut event = &epoll_event { events: EPOLLIN |EPOLLET,fd :infd};
+                //   //adding new connection's fd (infd) to epoll_instance (epfd) 
+                //   println!("infd:{}",infd);
+                //   s = unsafe {  epoll_ctl(epfd, EPOLL_CTL_ADD,infd,eventc) } ;
+                //   if epfd == -1 { panic!("error  adding new fd to epoll instance"); }
+                   break;
                 }     
-       }else {
-       println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
+       }
+       else {
+          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
     
        }
-           //checkN+=1;
-       //   }
-      // }
+       
      }  
 
 }  
