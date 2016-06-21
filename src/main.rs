@@ -2,10 +2,11 @@ extern crate libc;
 use libc::c_int;
 use std::error::Error;
 use std::env;  //to get command line arguments
+//to get fd from tcpListener
 use std::os::unix::io::AsRawFd;
 use std::net::{TcpListener,TcpStream};
-//use std::os::unix::io::AsRawFd;
-
+use std::os;
+use std::thread;
 //flags of libc
 pub const EPOLL_CTL_ADD: u32 = 1;
 pub const EPOLLIN:   u32 = 0x01;
@@ -31,31 +32,34 @@ extern {
    } 
 
 fn main(){  
-    // let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
+    let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
     // let host = args[1];
     // println!("");    
-    // let mut port: i32 = args[2].trim().parse().expect("Please type a number!");
-    
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    // let mut port: i32 = args[1].trim().parse().expect("Please type a number!");
+    // let mut address  = args[1] as String;
+
+    // let mut address =args.to_str();
+    println!("{}",args[1]);
+    let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
     
     let socket_fd = listener.as_raw_fd();
     println!("socket_fd:{}",socket_fd);
-  
-    let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
+
+    //to create epoll_instance  
+    let  epfd = unsafe{  epoll_create1(0)   }; 
     if epfd == -1 { panic!("epoll instance creation error"); }
 
+    //initialising epoll_event for socket_fd
     let mut event=&epoll_event { events: EPOLLIN |EPOLLET,fd :socket_fd};
-              
-    let mut s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd,event)  //to add file descriptor to epoll instance
+    //to add file descriptor to epoll instance          
+    let mut s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd,event)  
                    };
     if s == -1 { panic!("error while adding fd(socket_fd) to epoll instance "); }
 
     //to add file descriptor (of console) to epoll instance
-    let mut eventc=&epoll_event { events: EPOLLIN |EPOLLET,fd :0};
-    // println!("before inserting console to monitor");
+    let mut eventc=&epoll_event { events: EPOLLIN |EPOLLET,fd :0};    
     s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD,0,eventc)  
                    };
-    // println!("after inserting console to monitor");
     if s == -1 { panic!("error while adding fd(of console) to epoll instance"); }
 
     let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket_fd};     
@@ -64,7 +68,7 @@ fn main(){
     while true {
       //println!("start loop");
        
-      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,6000) };
+      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
        
        if n==0 {println!("timeout"); continue;}
        if n==-1 {println!("some error occured"); break;}
@@ -77,25 +81,39 @@ fn main(){
         {
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
-               while true
-                {
-                //  if s==-1 {  panic!("error while non-blocking the socket_fd"); }
-                //   //initialising struct for new conections
-                //   let mut event = &epoll_event { events: EPOLLIN |EPOLLET,fd :infd};
-                //   //adding new connection's fd (infd) to epoll_instance (epfd) 
-                //   println!("infd:{}",infd);
-                //   s = unsafe {  epoll_ctl(epfd, EPOLL_CTL_ADD,infd,eventc) } ;
-                //   if epfd == -1 { panic!("error  adding new fd to epoll instance"); }
-                   break;
-                }     
-       }
+                 
+                 for stream in listener.incoming() {
+                 println!("to check incoming connection");
+                 match stream {
+                         Ok(stream) => {
+                         thread::spawn(move|| {
+                         // connection succeeded
+                         serve_client(stream)
+                          });
+                         }
+                         Err(e) => {
+                         println!("Accept err {}", e); 
+                         }
+                   }
+                       
+                 }
+                 println!("after done checking parent_socket ");
+
+           }
        else {
           println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
     
        }
        
      }  
-
 }  
+
+ fn serve_client(stream: TcpStream) {
+     println!("{:?}",stream);
+    // stream.write(b"Hello Connection");
+    thread::sleep_ms(10000);
+    println!("closing:{}",stream.peer_addr().unwrap());
+//      println!("{}", stream.peer_addr().unwrap());
+ }
 
 
