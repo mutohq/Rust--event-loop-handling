@@ -12,17 +12,16 @@ pub const F_GETFL: c_int = 3;
 pub const O_NONBLOCK: c_int = 2048;
 pub const F_SETFL: c_int = 4;
 pub const SOMAXCONN: c_int = 120;
-//for fd-set
-pub const FD_SETSIZE: usize = 1024;
 
 //external functions of library(libc) and other c files
 extern {
       fn createANDbind(req: libc::c_int) -> libc::c_int;
       fn listen(socket_fd: c_int, backlog: c_int) -> c_int;
       fn makeSOCKETnonblocking(sfd: i32) -> i32;
-      fn select(nfds: c_int, readfs: i32, writefds: i32, 
-                errorfds: i32, timeout: * const timeval) -> c_int;
-    //   fn connection(socket_fd: i32) -> i32;
+      pub fn epoll_create1(flags: u32) -> libc::c_int;
+      pub fn epoll_ctl(epfd: c_int, op: u32, fd: i32, event: *const epoll_event) -> i32;
+      pub fn epoll_wait(epfd: libc::c_int, events:*const epoll_event, maxevents: libc::c_int, timeout: libc::c_int) -> libc::c_int;
+      fn connection(socket_fd: i32) -> i32;
   }
 
  //structure to represent epoll_events
@@ -49,76 +48,69 @@ fn main(){
     s= unsafe { listen(socket_fd,SOMAXCONN)};   //start listen on socket_fd with maximum length SOMAXCONN(120)
     if s==-1 { panic!("error while non-blocking the socket_fd"); }
     // println!("s:{}",s);
-    windows(socket_fd); 
+  
+    let  epfd = unsafe{  epoll_create1(0)   };  //to create epoll instance
+    if epfd == -1 { panic!("epoll instance creation error"); }
 
-}
+    let mut event=&epoll_event { events: EPOLLIN |EPOLLET,fd :socket_fd};
+              
+    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd,event)  //to add file descriptor to epoll instance
+                   };
+    if s == -1 { panic!("error while adding fd(socket_fd) to epoll instance "); }
 
+    //to add file descriptor (of console) to epoll instance
+    let mut eventc=&epoll_event { events: EPOLLIN |EPOLLET,fd :0};
+    // println!("before inserting console to monitor");
+    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD,0,eventc)  
+                   };
+    // println!("after inserting console to monitor");
+    if s == -1 { panic!("error while adding fd(of console) to epoll instance"); }
 
-struct timeval {
-    tv_sec: i32,
-    tv_usec: i32
-}
-
-struct fd_set {
-   pub fd_count: i32,
-   pub fd_array:[usize;FD_SETSIZE]
-}
-impl fd_set{
-    fn counter(&mut self){
-        self.fd_count+=1;
-    }
-}
-
-
-fn windows(socket_fd: i32){
-     let mut timeout = &timeval{tv_sec:10,tv_usec:0};
-   
-     let mut readfds = &fd_set{fd_count:1,fd_array: [0;FD_SETSIZE]};
+    let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket_fd};     
 
 //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
-      println!("start loop");
+      //println!("start loop");
        
-
-       let n= unsafe { select(10,0,0,0,timeout)};
-
-       println!("N:{}",n); 
+      let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,6000) };
+       
        if n==0 {println!("timeout"); continue;}
-       if n==-1 {println!("some error occured"); }
-
+       if n==-1 {println!("some error occured"); break;}
+       println!("\n Number of fd's accessed:{}, events on fd:{}, and events:{}",n,events.fd,events.events);
      
   //     let mut checkN=0;
   //     while checkN<n {
-	// // {     
-    //     if events.fd==socket_fd 
-    //     {
-    //      // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
-    //           println!("\nSOMETHING AT MAIN SOCKET\n"); 
-    //            while true
-    //             {
-    //              let infd = unsafe {connection(socket_fd) };
-    //               if infd==-1
-    //                  { 
-    //                    //println!("processed all incoming connections");
-    //                     break;
-    //                   }
-    //               //make new conection non-blocking    
-    //               let mut s = unsafe { makeSOCKETnonblocking(infd) };
-    //               if s==-1 {  panic!("error while non-blocking the socket_fd"); }
-    //               //initialising struct for new conections
-    //               let mut event = &epoll_event { events: EPOLLIN |EPOLLET,fd :infd};
-    //               //adding new connection's fd (infd) to epoll_instance (epfd) 
-    //               s = unsafe {  epoll_ctl(epfd, EPOLL_CTL_ADD,infd,eventc) } ;
-    //               if epfd == -1 { panic!("error  adding new fd to epoll instance"); }
+	// {     
+        if events.fd==socket_fd 
+        {
+         // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
+              println!("\nSOMETHING AT MAIN SOCKET\n"); 
+               while true
+                {
+                 let infd = unsafe {connection(socket_fd) };
+                  if infd==-1
+                     { 
+                       //println!("processed all incoming connections");
+                        break;
+                      }
+                  //make new conection non-blocking    
+                  let mut s = unsafe { makeSOCKETnonblocking(infd) };
+                  if s==-1 {  panic!("error while non-blocking the socket_fd"); }
+                  //initialising struct for new conections
+                  let mut event = &epoll_event { events: EPOLLIN |EPOLLET,fd :infd};
+                  //adding new connection's fd (infd) to epoll_instance (epfd) 
+                  println!("infd:{}",infd);
+                  s = unsafe {  epoll_ctl(epfd, EPOLL_CTL_ADD,infd,eventc) } ;
+                  if epfd == -1 { panic!("error  adding new fd to epoll instance"); }
 
-    //             }     
-    //    }else {
-    //    println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
+                }     
+       }else {
+       println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
     
-    //    }
-    //        //checkN+=1;
-    //    //   }
-    //   // }
+       }
+           //checkN+=1;
+       //   }
+      // }
      }  
 
 }  

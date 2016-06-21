@@ -39,7 +39,7 @@ int connection(int parent_socket){
           if (s == 0)
                 {
                 printf("New Connection accepted on descriptor %d "
-                        "(host=%s, port=%s)\n", infd, hbuf, sbuf);
+                        "(host=%s,%d ,port=%s,%d)\n", infd, hbuf,sizeof hbuf,sbuf,sizeof sbuf);
                 return infd;
                 }                
                 return -1;
