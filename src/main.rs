@@ -35,7 +35,8 @@ extern {
     pub fd: i32
    } 
 
-//structure for event..
+/*structure to serve the incoming event:  queue[to_serve[1],to_serve[2],to_serve[3],......]....
+  ....(RUNNING_THREADS < MAXTHREAD) then extract first connection from queue and serve it  */
 struct  to_serve{
     pub fd : i32,
     pub stream : TcpStream
@@ -48,21 +49,23 @@ fn main(){
      let mut queue  : Vec<to_serve> = Vec::new();
      //creating channel to communicate with event_loop
      let (tx, rx): (mpsc::Sender<to_serve>, mpsc::Receiver<to_serve>) = mpsc::channel();
-     println!("before event_loop");
+    //  println!("before event_loop");
      //starting event_loop
      thread::spawn(move ||{
       event_loop(tx);
      });
-     println!("after event_loop");
+    //  println!("after event_loop");
      while true{
         let catch  = rx.recv().unwrap();
-        println!("{:?}",catch.stream);
+
+         thread::spawn(move|| {  serve_client(catch.stream)  });
+        //println!("{:?}",catch.stream);
      }
 }
 
-//event_loop (thread)
+//***Event_loop (thread) ***
 fn event_loop(tx: mpsc::Sender<to_serve>) {
-    println!("in event_loop");
+    // println!("in event_loop");
     // let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
     // let host = args[1];
     // println!("");    
@@ -112,17 +115,18 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
         {
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
+         // clone the channel to save it from moving...
                  let tx = tx.clone();
                  for stream in listener.incoming() {
                  println!("to check incoming connection");
                  match stream {
                          Ok(stream) => {
-                         thread::spawn(move|| {
-                        //  connection succeeded
+                        //  connection succeeded                        
+                        // create instance of incoming connection 
                          let mut connection = to_serve{ fd: stream.as_raw_fd(), stream: stream };
-                        //  serve_client(stream)
-                           tx.send(connection)
-                          });
+                        //  send back the caught connection to management thread.(to serve client).
+                           tx.send(connection);
+                         
                          }
                          Err(e) => {
                          println!("Accept err {}", e); 
@@ -134,8 +138,7 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
 
            }
        else {
-          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
-    
+          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);    
        }
        
      }  
