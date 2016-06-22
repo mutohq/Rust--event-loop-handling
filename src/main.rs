@@ -7,6 +7,10 @@ use std::os::unix::io::AsRawFd;
 use std::net::{TcpListener,TcpStream};
 use std::os;
 use std::thread;
+//for channels
+use std::sync::mpsc;
+
+
 //flags of libc
 pub const EPOLL_CTL_ADD: u32 = 1;
 pub const EPOLLIN:   u32 = 0x01;
@@ -31,15 +35,42 @@ extern {
     pub fd: i32
    } 
 
-fn main(){  
-    let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
+//structure for event..
+struct  to_serve{
+    pub fd : i32,
+    pub stream : TcpStream
+    }
+
+//*** (Management thread) ***
+fn main(){
+     let MAXTHREAD:i32 =5;
+     let mut counter=0;
+     let mut queue  : Vec<to_serve> = Vec::new();
+     //creating channel to communicate with event_loop
+     let (tx, rx): (mpsc::Sender<to_serve>, mpsc::Receiver<to_serve>) = mpsc::channel();
+     println!("before event_loop");
+     //starting event_loop
+     thread::spawn(move ||{
+      event_loop(tx);
+     });
+     println!("after event_loop");
+     while true{
+        let catch  = rx.recv().unwrap();
+        println!("{:?}",catch.stream);
+     }
+}
+
+//event_loop (thread)
+fn event_loop(tx: mpsc::Sender<to_serve>) {
+    println!("in event_loop");
+    // let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
     // let host = args[1];
     // println!("");    
     // let mut port: i32 = args[1].trim().parse().expect("Please type a number!");
     // let mut address  = args[1] as String;
 
     // let mut address =args.to_str();
-    println!("{}",args[1]);
+    // println!("{}",args[1]);
     let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
     
     let socket_fd = listener.as_raw_fd();
@@ -81,23 +112,25 @@ fn main(){
         {
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
-                 
+                 let tx = tx.clone();
                  for stream in listener.incoming() {
                  println!("to check incoming connection");
                  match stream {
                          Ok(stream) => {
                          thread::spawn(move|| {
-                         // connection succeeded
-                         serve_client(stream)
+                        //  connection succeeded
+                         let mut connection = to_serve{ fd: stream.as_raw_fd(), stream: stream };
+                        //  serve_client(stream)
+                           tx.send(connection)
                           });
                          }
                          Err(e) => {
                          println!("Accept err {}", e); 
                          }
                    }
-                       
+                    break;     
                  }
-                 println!("after done checking parent_socket ");
+                //  println!("after done checking parent_socket ");
 
            }
        else {
