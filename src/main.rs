@@ -7,8 +7,13 @@ use std::os::unix::io::AsRawFd;
 use std::net::{TcpListener,TcpStream};
 use std::os;
 use std::thread;
+use std::ptr;
 //for channels
 use std::sync::mpsc;
+//for dequeue implementation.. 
+use std::collections::VecDeque;
+//to make immutable content to share among threads safely
+use std::sync::{Arc,Mutex};
 
 
 //flags of libc
@@ -20,6 +25,7 @@ pub const F_GETFL: c_int = 3;
 pub const O_NONBLOCK: c_int = 2048;
 pub const F_SETFL: c_int = 4;
 pub const SOMAXCONN: c_int = 120;
+pub const MAXTHREAD :i32 = 5;
 
 //external functions of library(libc) and other c files
 extern {
@@ -39,32 +45,13 @@ extern {
   ....(RUNNING_THREADS < MAXTHREAD) then extract first connection from queue and serve it  */
 struct  to_serve{
     pub fd : i32,
-    pub stream : TcpStream
+    pub stream : Option<TcpStream>,
+    pub status: bool 
     }
 
-//*** (Management thread) ***
-fn main(){
-     let MAXTHREAD:i32 =5;
-     let mut counter=0;
-     let mut queue  : Vec<to_serve> = Vec::new();
-     //creating channel to communicate with event_loop
-     let (tx, rx): (mpsc::Sender<to_serve>, mpsc::Receiver<to_serve>) = mpsc::channel();
-    //  println!("before event_loop");
-     //starting event_loop
-     thread::spawn(move ||{
-      event_loop(tx);
-     });
-    //  println!("after event_loop");
-     while true{
-        let catch  = rx.recv().unwrap();
-
-         thread::spawn(move|| {  serve_client(catch.stream)  });
-        //println!("{:?}",catch.stream);
-     }
-}
 
 //***Event_loop (thread) ***
-fn event_loop(tx: mpsc::Sender<to_serve>) {
+fn main() {
     // println!("in event_loop");
     // let mut args: Vec<_> = env::args().collect(); //to get command line arguments.
     // let host = args[1];
@@ -74,7 +61,7 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
 
     // let mut address =args.to_str();
     // println!("{}",args[1]);
-    let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     
     let socket_fd = listener.as_raw_fd();
     println!("socket_fd:{}",socket_fd);
@@ -97,10 +84,21 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
     if s == -1 { panic!("error while adding fd(of console) to epoll instance"); }
 
     let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket_fd};     
-
+    
+    //queue to store fired events..
+    let mut queue   = Arc::new(Mutex::new(vec![to_serve{fd:0,stream:None,status:false}]));
+    {
+        let mut temp_queue = queue.lock().unwrap();
+        temp_queue.remove(0);
+    }   
+    let mut thread_count = Arc::new(Mutex::new(0));
+    {
+        let t =thread_count.lock().unwrap();
+        println!("thread_count:{}",*t);
+    }
 // //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
-      //println!("start loop");
+      println!("start loop");
        
       let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
        
@@ -115,18 +113,18 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
         {
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
-         // clone the channel to save it from moving...
-                 let tx = tx.clone();
+
                  for stream in listener.incoming() {
-                 println!("to check incoming connection");
+                //  println!("to check incoming connection");
                  match stream {
                          Ok(stream) => {
                         //  connection succeeded                        
                         // create instance of incoming connection 
-                         let mut connection = to_serve{ fd: stream.as_raw_fd(), stream: stream };
+                         let mut connection = to_serve{ fd: stream.as_raw_fd(), stream: Some(stream) ,status:false };
+                           {      let mut temp_queue = queue.lock().unwrap();
+                                  temp_queue.push(connection);     
+                           }
                         //  send back the caught connection to management thread.(to serve client).
-                           tx.send(connection);
-                         
                          }
                          Err(e) => {
                          println!("Accept err {}", e); 
@@ -138,17 +136,81 @@ fn event_loop(tx: mpsc::Sender<to_serve>) {
 
            }
        else {
-          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);    
+          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
+             
+          let mut connection = to_serve{ fd: events.fd,stream : None ,status:false };
+          {             {        let mut temp_queue = queue.lock().unwrap();
+                                  temp_queue.push(connection);     
+                           }
+           
+           }
        }
-       
-     }  
-}  
+      //function to process queue
+  
+          let mut len ;
+          {      let mut temp_queue = queue.lock().unwrap();
+                 len = temp_queue.len();     
+           }    
+         println!("length of queue:{}",len);
 
- fn serve_client(stream: TcpStream) {
-     println!("{:?}",stream);
+      for i in 0..len  {
+        println!("INSIDE QUEUE PROCESSING");
+        let mut cp =  thread_count.lock().unwrap();
+        let ctr;
+        let state:bool;                   
+        {      println!("waiting for lock on queue");
+               let mut queue_elem = queue.lock().unwrap();
+               state = queue_elem[i].status;
+        }
+        {       
+               println!("waiting for lock on thread_count");
+               let mut count = thread_count.lock().unwrap();
+               println!("after for lock on thread_count");
+               ctr = *count;
+               
+               println!("after accessing locks");
+        }        
+        println!("thread_count:{}",ctr);
+         if ctr < MAXTHREAD  {
+              if !state {
+                { let mut count =  thread_count.lock().unwrap();
+                  *count +=1;
+                }
+              let thread_count = thread_count.clone();
+              let queue = queue.clone();  
+               //new thread to serve client_request
+                   thread::spawn(move || {
+                    let mut temp_queue = queue.lock().unwrap();
+                    let ref mut client = temp_queue[i];   
+                    serve_client(client);  
+                    let mut count = thread_count.lock().unwrap();
+                    *count -=1;
+                    //  queue[i].status = true;
+                });
+                 
+              }
+          }else{
+              break;
+          }
+        }
+
+       
+  }  
+}
+// function to serve client request..
+ fn serve_client(request: &mut to_serve) {
+    //  match request.stream {
+    //      None => {    println!("serving internal file request from:{}",request.fd);
+    //      }
+    //      Some(stream) =>{
+    //           println!("serving network request{}",stream.peer_addr().unwrap());
+    //      }
+    //  }
     // stream.write(b"Hello Connection");
     thread::sleep_ms(10000);
-    println!("closing:{}",stream.peer_addr().unwrap());
+    request.status = true;
+    println!("closing wrorking on fd:{ }",request.fd);
+    
 //      println!("{}", stream.peer_addr().unwrap());
  }
 
