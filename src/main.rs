@@ -91,12 +91,12 @@ fn main() {
         let mut temp_queue = queue.lock().unwrap();
         temp_queue.remove(0);
     }   
-    let mut thread_count = Arc::new(Mutex::new(0));
+    let  thread_count = Arc::new(Mutex::new(0));
    
 // //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
-      println!("start loop");
-       
+      println!("start event_loop");
+      
       let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
        
        if n==0 {println!("timeout"); continue;}
@@ -108,6 +108,7 @@ fn main() {
 	// {     
         if events.fd==socket_fd 
         {
+
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("\nSOMETHING AT MAIN SOCKET\n"); 
 
@@ -133,7 +134,7 @@ fn main() {
 
            }
        else {
-          println!("\n Some events:{} on fd:{}  ",events.events,events.fd);
+          println!("\n events noticed on  fd:{}  ",events.fd);
              
           let mut connection = to_serve{ fd: events.fd,stream : None ,status:false };
           {             {        let mut temp_queue = queue.lock().unwrap();
@@ -141,50 +142,45 @@ fn main() {
                            }
            
            }
-       }
-      //function to process queue
+         }
+  //function to process queue
   
           let mut len ;
            {      let mut temp_queue = queue.lock().unwrap();
                  len = temp_queue.len();     
            }    
          println!("length of queue:{}",len);
-
+     
       for i in 0..len  {
-        println!("INSIDE QUEUE PROCESSING");
-        let mut cp =  thread_count.lock().unwrap();
+        // println!("INSIDE QUEUE PROCESSING");
+    
         let mut ctr=0;
         let mut state:bool;                   
-        {      println!("waiting for lock on queue");
+        {      //accessing mutually-exclusive values..
                let mut queue_elem = queue.lock().unwrap();
                state = queue_elem[i].status;
+               let mut thread_count = thread_count.lock().unwrap();
+               ctr =*thread_count;       
         }
+       
 
-        // {       
-        //        println!("waiting for lock on thread_count");
-        //        let mut count = thread_count.lock().unwrap();
-        //        println!("after for lock on thread_count");
-        //        ctr = *count;
-               
-        //        println!("after accessing locks");
-        // }        
-        println!("thread_count:{}",ctr);
          if ctr < MAXTHREAD  {
-             println!("inside ctr<MAXTHREAD");
+            //  println!("inside ctr<MAXTHREAD");
               if !state {
-                   println!("after flag checking");
-                // {   
-                //     let mut count =  thread_count.lock().unwrap();
-                //     *count +=1;
-                // }
+                //    println!("after flag checking");
+                {   
+                    let mut count =  thread_count.lock().unwrap();
+                    *count +=1;
+                    println!("value of thread_count:{}",*count);
+                }
               let thread_count = thread_count.clone();
               let queue = queue.clone();  
-               println!("outer side thread::spawning");
+            //    println!("outer side thread::spawning");
                //new thread to serve client_request
                    thread::spawn(move || {
                     let mut temp_queue = queue.lock().unwrap();
                     let ref mut client = temp_queue[i];   
-                    println!("before spawning new thread");
+                    // println!("before spawning new thread");
                     serve_client(client);  
                     let mut count = thread_count.lock().unwrap();
                     *count -=1;
@@ -202,7 +198,7 @@ fn main() {
 
 // function to serve client request..
  fn serve_client(request: &mut to_serve) {
-     println!("inside new thread");
+    //  println!("inside new thread");
      
     match request.stream {
          None => {    println!("serving internal file request from:{}",request.fd);
@@ -213,7 +209,7 @@ fn main() {
          }
      }
 
-    thread::sleep_ms(100);
+    thread::sleep_ms(5000);
     request.status = true;
     println!("closing wrorking on fd:{ }",request.fd);
  }
