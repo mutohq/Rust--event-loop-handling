@@ -92,10 +92,7 @@ fn main() {
         temp_queue.remove(0);
     }   
     let mut thread_count = Arc::new(Mutex::new(0));
-    {
-        let t =thread_count.lock().unwrap();
-        println!("thread_count:{}",*t);
-    }
+   
 // //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
       println!("start loop");
@@ -148,7 +145,7 @@ fn main() {
       //function to process queue
   
           let mut len ;
-          {      let mut temp_queue = queue.lock().unwrap();
+           {      let mut temp_queue = queue.lock().unwrap();
                  len = temp_queue.len();     
            }    
          println!("length of queue:{}",len);
@@ -156,36 +153,41 @@ fn main() {
       for i in 0..len  {
         println!("INSIDE QUEUE PROCESSING");
         let mut cp =  thread_count.lock().unwrap();
-        let ctr;
-        let state:bool;                   
+        let mut ctr=0;
+        let mut state:bool;                   
         {      println!("waiting for lock on queue");
                let mut queue_elem = queue.lock().unwrap();
                state = queue_elem[i].status;
         }
-        {       
-               println!("waiting for lock on thread_count");
-               let mut count = thread_count.lock().unwrap();
-               println!("after for lock on thread_count");
-               ctr = *count;
+
+        // {       
+        //        println!("waiting for lock on thread_count");
+        //        let mut count = thread_count.lock().unwrap();
+        //        println!("after for lock on thread_count");
+        //        ctr = *count;
                
-               println!("after accessing locks");
-        }        
+        //        println!("after accessing locks");
+        // }        
         println!("thread_count:{}",ctr);
          if ctr < MAXTHREAD  {
+             println!("inside ctr<MAXTHREAD");
               if !state {
-                { let mut count =  thread_count.lock().unwrap();
-                  *count +=1;
-                }
+                   println!("after flag checking");
+                // {   
+                //     let mut count =  thread_count.lock().unwrap();
+                //     *count +=1;
+                // }
               let thread_count = thread_count.clone();
               let queue = queue.clone();  
+               println!("outer side thread::spawning");
                //new thread to serve client_request
                    thread::spawn(move || {
                     let mut temp_queue = queue.lock().unwrap();
                     let ref mut client = temp_queue[i];   
+                    println!("before spawning new thread");
                     serve_client(client);  
                     let mut count = thread_count.lock().unwrap();
                     *count -=1;
-                    //  queue[i].status = true;
                 });
                  
               }
@@ -197,21 +199,23 @@ fn main() {
        
   }  
 }
+
 // function to serve client request..
  fn serve_client(request: &mut to_serve) {
-    //  match request.stream {
-    //      None => {    println!("serving internal file request from:{}",request.fd);
-    //      }
-    //      Some(stream) =>{
-    //           println!("serving network request{}",stream.peer_addr().unwrap());
-    //      }
-    //  }
-    // stream.write(b"Hello Connection");
-    thread::sleep_ms(10000);
+     println!("inside new thread");
+     
+    match request.stream {
+         None => {    println!("serving internal file request from:{}",request.fd);
+         }
+         //takes reference to prevent "move out of borrowed content (request stream)"
+         Some(ref stream) =>{
+              println!("serving network request{}",stream.peer_addr().unwrap());
+         }
+     }
+
+    thread::sleep_ms(100);
     request.status = true;
     println!("closing wrorking on fd:{ }",request.fd);
-    
-//      println!("{}", stream.peer_addr().unwrap());
  }
 
 
