@@ -7,7 +7,7 @@ use std::os::unix::io::AsRawFd;
 use std::net::{TcpListener,TcpStream};
 use std::os;
 use std::thread;
-use std::ptr;
+use std::sync::mpsc::{Sender,Receiver};
 //for channels
 use std::sync::mpsc;
 //to make immutable content to share among threads safely
@@ -41,20 +41,55 @@ extern {
 
 /*structure to serve the incoming event:  queue[to_serve[1],to_serve[2],to_serve[3],......]....
   ....(RUNNING_THREADS < MAXTHREAD) then extract first connection from queue and serve it  */
-struct  to_serve{
+struct  to_serve<T>{
     pub fd : i32,
-    pub stream : Option<TcpStream>,
-    pub status: bool 
+    pub status: bool,
+    pub inner: T 
     }
 
+//A trait which is neccessary for every user structure to implement    
+ trait neccessary {
+    fn initial(&self);
+ }
+
+ struct network_sockets {
+    num: i32 
+    // pub stream:TcpListener
+ }
+
+impl neccessary for network_sockets {
+     fn initial(&self) {
+       println!("network_sockets=>num:{}",self.num);
+     }  
+}
+
+fn main(){
+
+let (tx,rx):(Sender<network_sockets>,Receiver<network_sockets>) = mpsc::channel();
+
+ thread::spawn(move ||{
+    event_loop(rx);
+ }
+ );
+  
+// let listener = TcpListener::bind("127.0.0.1:7070").unwrap();
+//let socket_fd = listener.as_raw_fd()
+let instance = network_sockets{num:01};
+{let tx=tx.clone();
+eventloop_add(instance,tx);
+}
+eventloop_add(network_sockets{num:21},tx);  
+thread::sleep_ms(200000);
+ 
+}
 
 //***Event_loop (thread) ***
-fn main() {
+fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
     let args: Vec<_> = env::args().collect(); //to get command line arguments.
     // println!("{}",args[1]);
     //to convert String to &str (because String does not live for entire lifetime of program)
-    let address :&str= &*args[1] ;
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    // let address :&str= &*args[1] ;
+    let listener = TcpListener::bind("127.0.0.1:6565").unwrap();
     
     let socket_fd = listener.as_raw_fd();
     println!("socket_fd:{}",socket_fd);
@@ -70,22 +105,12 @@ fn main() {
                        };
     if s == -1 { panic!("error while adding fd(socket_fd) to epoll instance "); }
 
-    
-    //to add file descriptor (of console) to epoll instance
-    let mut eventc=&epoll_event { events: EPOLLIN |EPOLLET,fd :0};    
-    s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD,0,eventc)  
-               };
-    if s == -1 { panic!("error while adding fd(of console) to epoll instance"); }
 
     //creating a event_epoll event instance to capture the events from epoll_wait
     let mut events = &epoll_event { events: EPOLLIN | EPOLLET, fd :socket_fd};     
     
     //creating queue to store data of  fired events
-    let mut queue   = Arc::new(Mutex::new(vec![to_serve{fd:0,stream:None,status:false}]));
-    {
-        let mut temp_queue = queue.lock().unwrap();
-        temp_queue.remove(0);
-    }
+    let mut queue   = Arc::new(Mutex::new(Vec::new()));    
     //varibles to store number of running threads  
     let thread_count = Arc::new(Mutex::new(0));
    
@@ -95,44 +120,25 @@ fn main() {
       
       let mut n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
        
-       if n==0 {println!("timeout"); continue;}
+       if n==0 {println!("timeout"); }
        if n==-1 {println!("some error occured"); continue;}
-      // println!("\n Number of fd's accessed:{}, events on fd:{}, and events:{}",n,events.fd,events.events);
-
+     
+        if n>0{
         if events.fd==socket_fd 
         {
 
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
-              println!("\nSOMETHING AT MAIN SOCKET\n"); 
-
-                 for stream in listener.incoming() {
-                //  println!("to check incoming connection");
-                 match stream {
-                         Ok(stream) => {
-                        //  connection succeeded                        
-                        // create instance of incoming connection 
-                         let mut connection = to_serve{ fd: stream.as_raw_fd(), stream: Some(stream) ,status:false };
-                           {      //inserting new connection from socket to queue(to_serve)
-                                  let mut temp_queue = queue.lock().unwrap();
-                                  temp_queue.push(connection);     
-                           }
-                         }
-                         Err(e) => {
-                         println!("Accept err {}", e); 
-                         }
-                   }
-                    break;     
-                 }
+              println!("SOMETHING AT MAIN SOCKET"); 
+              let inst = rx.recv().unwrap();
+              {   //inserting event from files(other than socket) to queue(to_serve)      
+                 let mut temp_queue = queue.lock().unwrap();
+                 temp_queue.push(to_serve{ fd:0 , status:false,inner:inst});     
+              } 
+              
            }
        else {
-          println!("\n\n EVENTS NOTICED ON FD  :{}  ",events.fd);             
-          let mut connection = to_serve{ fd: events.fd,stream : None ,status:false };
-          {         
-             {  //inserting event from files(other than socket) to queue(to_serve)      
-                let mut temp_queue = queue.lock().unwrap();
-                temp_queue.push(connection);     
-             }           
-          }
+          println!(" EVENTS NOTICED ON FD  :{}  ",events.fd);             
+           }
         }
         
         //HERE BEGINS the QUEUE-PROCESSING
@@ -151,7 +157,8 @@ fn main() {
                let mut queue_elem = queue.lock().unwrap();
                state = queue_elem[i].status;
                let mut thread_count = thread_count.lock().unwrap();
-               ctr =*thread_count;       
+               ctr =*thread_count;
+               println!("value of thread_count:{} ",*thread_count);       
         }
        
          if ctr < MAXTHREAD  {
@@ -160,7 +167,7 @@ fn main() {
                 {   //increasing thread_count by 1 ,before spawing new thread
                     let mut thread_count =  thread_count.lock().unwrap();
                     *thread_count +=1;
-                    println!("value of thread_count:{}",*thread_count);
+                    println!("value of thread_count:{} ",*thread_count);
                 }
               //cloning varibles that are going to be shared among threads 
               let thread_count = thread_count.clone();
@@ -170,7 +177,7 @@ fn main() {
                     let mut temp_queue = queue.lock().unwrap();
                     let ref mut client = temp_queue[i];   
                     //function call to serve request
-                    serve_client(client);
+                    serve(client);
                     //decreasing thread_count by one (as request got processed in above function call)  
                     let mut thread_count = thread_count.lock().unwrap();
                     *thread_count -=1;
@@ -180,29 +187,26 @@ fn main() {
           }else{
               break;
           }
-        }
-
-       
+        }       
   }  
 }
 
+fn eventloop_add<T>(instance: T , tx:Sender<T>) {
+      tx.send(instance).unwrap();
+      
+}
+
  // function to serve  request (it serves requests from both internal files and sockets)..
- fn serve_client(request: &mut to_serve) {
-    //check stream (if stream is present then request on socket otherwise on internal file) 
-    match request.stream {
-         None => {    println!("serving internal file request from:{}",request.fd);
-         }
-         //takes reference to prevent "move out of borrowed content (request stream)"
-         Some(ref stream) =>{
-              println!("serving network request{}, fd:{}",stream.peer_addr().unwrap(),request.fd);
-         }
-     }
+ fn serve<T:neccessary>(request: &mut to_serve<T>) {
+   
     //make thread to sleep for some msec's (just for simulation)
     thread::sleep_ms(2000);
+    request.inner.initial();
+    println!("worked fd:{}",request.fd);  
     /*updating status of queue instance(to refelect that it had processed one time)...
       ... one can also use counter to reflect number of times particular request(to_serve instance) got served*/
     request.status = true;
-    println!("closing wrorking on fd:{ }",request.fd);
+
  }
 
 
