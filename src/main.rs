@@ -38,34 +38,37 @@ extern {
     pub events: u32,
     pub fd: i32
    } 
-
+//A trait which is neccessary for every user structure to implement    
+ trait neccessary {
+    fn initial(&self);
+  
+ }
 /*structure to serve the incoming event:  queue[to_serve[1],to_serve[2],to_serve[3],......]....
   ....(RUNNING_THREADS < MAXTHREAD) then extract first connection from queue and serve it  */
 struct  to_serve<T>{
     pub fd : i32,
-    pub status: bool,
+    pub status: i32,
     pub inner: T 
     }
 
-//A trait which is neccessary for every user structure to implement    
- trait neccessary {
-    fn initial(&self);
- }
-
  struct network_sockets {
-    num: i32 
+    num: i32 ,
+    address: &'static str
     // pub stream:TcpListener
  }
 
 impl neccessary for network_sockets {
      fn initial(&self) {
-       println!("network_sockets=>num:{}",self.num);
+       println!("network_sockets=>num:{}, {}",self.num,self.address);
      }  
+}
+fn make_channel<T>() ->(Sender<to_serve<T>>,Receiver<to_serve<T>>) {
+      let (tx,rx):(Sender<to_serve<T>>,Receiver<to_serve<T>>) = mpsc::channel();
+      (tx,rx)
 }
 
 fn main(){
-
-let (tx,rx):(Sender<network_sockets>,Receiver<network_sockets>) = mpsc::channel();
+let (tx,rx)= make_channel();
 
  thread::spawn(move ||{
     event_loop(rx);
@@ -74,17 +77,17 @@ let (tx,rx):(Sender<network_sockets>,Receiver<network_sockets>) = mpsc::channel(
   
 // let listener = TcpListener::bind("127.0.0.1:7070").unwrap();
 //let socket_fd = listener.as_raw_fd()
-let instance = network_sockets{num:01};
+let instance = network_sockets{num:01,address:"first"};
 {let tx=tx.clone();
-eventloop_add(instance,tx);
+eventloop_add(instance,tx,2);
 }
-eventloop_add(network_sockets{num:21},tx);  
+eventloop_add(network_sockets{num:21,address:"Second"},tx,1);  
 thread::sleep_ms(200000);
  
 }
 
 //***Event_loop (thread) ***
-fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
+fn event_loop<T:Send + Sync +'static+neccessary>(rx: Receiver<to_serve<T>>) {
     let args: Vec<_> = env::args().collect(); //to get command line arguments.
     // println!("{}",args[1]);
     //to convert String to &str (because String does not live for entire lifetime of program)
@@ -129,10 +132,11 @@ fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
 
          // We have a notification on the listening socket_fd(parent), which  means there may be more incoming connections.    
               println!("SOMETHING AT MAIN SOCKET"); 
-              let inst = rx.recv().unwrap();
+              // let elem = rx.recv.unwrap();
+              let instance = rx.recv().unwrap();
               {   //inserting event from files(other than socket) to queue(to_serve)      
                  let mut temp_queue = queue.lock().unwrap();
-                 temp_queue.push(to_serve{ fd:0 , status:false,inner:inst});     
+                 temp_queue.push(instance);     
               } 
               
            }
@@ -152,7 +156,7 @@ fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
         // println!("INSIDE QUEUE PROCESSING");
     
         let mut ctr;
-        let mut state:bool;                   
+        let mut state:i32;                   
         {      //accessing mutually-exclusive values..
                let mut queue_elem = queue.lock().unwrap();
                state = queue_elem[i].status;
@@ -163,7 +167,7 @@ fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
        
          if ctr < MAXTHREAD  {
             //  println!("inside ctr<MAXTHREAD");
-              if !state {
+              if state>0 {
                 {   //increasing thread_count by 1 ,before spawing new thread
                     let mut thread_count =  thread_count.lock().unwrap();
                     *thread_count +=1;
@@ -191,8 +195,9 @@ fn event_loop<T:Send + Sync+'static+neccessary>(rx: Receiver<T>) {
   }  
 }
 
-fn eventloop_add<T>(instance: T , tx:Sender<T>) {
-      tx.send(instance).unwrap();
+fn eventloop_add<T>(instance: T  , tx:Sender<to_serve<T>>,repeat: i32) {
+      let temp_elem = to_serve{ fd:0 , status:repeat,inner:instance};
+      tx.send(temp_elem).unwrap();
       
 }
 
@@ -205,7 +210,7 @@ fn eventloop_add<T>(instance: T , tx:Sender<T>) {
     println!("worked fd:{}",request.fd);  
     /*updating status of queue instance(to refelect that it had processed one time)...
       ... one can also use counter to reflect number of times particular request(to_serve instance) got served*/
-    request.status = true;
+    request.status -=1;
 
  }
 
