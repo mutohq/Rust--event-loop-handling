@@ -75,8 +75,7 @@ let (tx,rx)= make_channel();
  }
  );
   
-// let listener = TcpListener::bind("127.0.0.1:7070").unwrap();
-//let socket_fd = listener.as_raw_fd()
+thread::sleep_ms(1000);
 let instance = network_sockets{num:01,address:"first"};
 {let tx=tx.clone();
 eventloop_add(instance,tx,2);
@@ -198,6 +197,7 @@ fn event_loop<T:Send + Sync +'static+neccessary>(rx: Receiver<to_serve<T>>) {
 fn eventloop_add<T>(instance: T  , tx:Sender<to_serve<T>>,repeat: i32) {
       let temp_elem = to_serve{ fd:0 , status:repeat,inner:instance};
       tx.send(temp_elem).unwrap();
+      let stream = TcpStream::connect("127.0.0.1:6565").unwrap();
       
 }
 
