@@ -32,27 +32,28 @@ extern {
     pub fd: i32
    } 
 
-/*structure to serve the incoming event:  queue[ToServe[1],ToServe[2],ToServe[3],......]....
-  ....(RUNNING_THREADS < MAXTHREAD) then extract first connection from queue and serve it  */
+/*structure to serve the incoming event:  queue[ToServe[1],ToServe[2],ToServe[3],..]..
+  ....( RUNNING_THREADS < MAXTHREAD ) then extract first connection from queue and  ...
+  ....serve it  */
 struct  ToServe<T>{
     pub fd : i32,
     pub status: i32,
     pub register:bool,
     pub inner: T 
     }
- //create channel to interact with event_loop(Neccessary to call by every user)   
+
+//create channel to interact with event_loop(Neccessary to call by every user)   
 fn make_channel<T>() ->(Sender<ToServe<T>>,Receiver<ToServe<T>>) {
       let (tx,rx):(Sender<ToServe<T>>,Receiver<ToServe<T>>) = mpsc::channel();
       (tx,rx)
 }
 
-// pub static mut epfd:libc::c_int =1;
 //A trait which is Neccessary for every user structure to implement    
  trait Neccessary {
     fn initial(&self);  
  }
 
-
+//SIMULATION CODE STARTS ..
  struct Cars {
     num: i32 ,
     name: &'static str
@@ -78,7 +79,7 @@ let (tx,rx)= make_channel();
 
 start_eventloop(rx); 
 
-// let instance = Cars{num:01,name:"SWIFT - DEZIRE"};
+// let instance = Cars{num:6405,name:"SWIFT - DEZIRE"};
 // {  let tx=tx.clone();
 //    eventloop_add(instance,tx,5);
 // }
@@ -87,14 +88,15 @@ eventloop_add(Bikes{num:21,name:"ROYAL - ENFEILD"},tx,3);
 }
 let listener = TcpListener::bind("127.0.0.1:6564").unwrap(); 
 let t_fd= listener.as_raw_fd();
-eventloop_register(t_fd,Bikes{num:21,name:"ROYAL - ENFEILD"},tx); 
+eventloop_register(t_fd,Bikes{num:0629,name:"ROYAL - ENFEILD"},tx); 
 thread::sleep_ms(200000);
  
 }
+//....SIMULATION CODE ENDS
 
 
 
-//function to start event_loop
+//function to start event_loop thread.
 fn start_eventloop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>){
  thread::spawn(move ||{
     event_loop(rx);
@@ -106,20 +108,13 @@ thread::sleep_ms(1000);
 
 //***Event_loop (thread) ***
 fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
-    // let args: Vec<_> = env::args().collect(); //to get command line arguments.
-    // println!("{}",args[1]);
-    //to convert String to &str (because String does not live for entire lifetime of program)
-    // let address :&str= &*args[1] ;
-    let listener = TcpListener::bind("127.0.0.1:6565").unwrap();
-    
+    let listener = TcpListener::bind("127.0.0.1:6565").unwrap();    
     let socket_fd = listener.as_raw_fd();
     println!("socket_fd:{}",socket_fd);
-
     //to create epoll_instance  
     let epfd = unsafe{  epoll_create1(0)   }; 
-    println!("epfd:{}",epfd);
+    // println!("epfd:{}",epfd);
     if epfd == -1 { panic!("epoll instance creation error"); }
-
     //initialising EpollEvent for socket_fd
     let  event=&EpollEvent { events: EPOLLIN |EPOLLET,fd :socket_fd};
     //to add file descriptor to epoll instance          
@@ -127,10 +122,8 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                        };
     if s == -1 { panic!("error while adding fd(socket_fd) to epoll instance "); }
 
-
     //creating a event_epoll event instance to capture the events from epoll_wait
-    let  events = &EpollEvent { events: EPOLLIN | EPOLLET, fd :socket_fd};     
-    
+    let  events = &EpollEvent { events: EPOLLIN | EPOLLET, fd :socket_fd};         
     //creating queue to store data of  fired events
     let  queue   = Arc::new(Mutex::new(Vec::new()));    
     //varibles to store number of running threads  
@@ -138,81 +131,80 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
    
 //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
-    //   println!("start event_loop");
-      
-      let  n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };
-       
+      let  n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };      
        if n==0 {println!("timeout"); }
        if n==-1 {println!("some error occured"); continue;}
       //  println!("number of events:{}",n);
+       let  len ;
+       {      let  temp_queue = queue.lock().unwrap();
+              len = temp_queue.len();     
+       }    
+     
         if n>0{
+         //enter if there is some event on monitoring fd's 
         if events.fd==socket_fd 
-        {     //event on default socket_fd -represents something to add to queue
+        {     //event on default socket_fd (represents something to add to queue)
               println!(""); 
               let instance = rx.recv().unwrap();
               if instance.register{
+                     //some fd to add to monitoring_list of epoll
                      let  event=&EpollEvent { events: EPOLLIN |EPOLLET,fd :instance.fd};
                      //to add file descriptor to epoll instance          
                      let  s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, instance.fd,event)  
                        };
               } 
-               
-                //inserting event from files(other than socket) to queue(ToServe)      
+                 //adding received instance to processing queue  
                  let mut temp_queue = queue.lock().unwrap();
                  temp_queue.push(instance);     
               
            }
        else {
         //  println!("event on fd:{}",events.fd);
-                   let  len ;
-           {      let  temp_queue = queue.lock().unwrap();
-                 len = temp_queue.len();     
-           }    
-     
-       for i in 0..len  {
-        let  ctr;                 
-        {      //accessing mutually-exclusive values..
-               let  mut queue_elem = queue.lock().unwrap();
-               if queue_elem[i].fd==events.fd{
-                //  println!("status updated");
-               queue_elem[i].status=1;
-               }else{continue;}
-               let  thread_count = thread_count.lock().unwrap();
-               ctr =*thread_count;
-              //  println!(" thread_count:{} ",*thread_count);       
-        }
-         if ctr < MAXTHREAD  {
-                {   //increasing thread_count by 1 ,before spawing new thread
-                    let mut thread_count =  thread_count.lock().unwrap();
-                    *thread_count +=1;
-                    // println!("value of thread_count:{} ",*thread_count);
-                }
-              //cloning varibles that are going to be shared among threads 
-              let thread_count = thread_count.clone();
-              let queue = queue.clone();  
-              //new thread to serve client_request
-                   thread::spawn(move || {
-                    let mut temp_queue = queue.lock().unwrap();
-                    let ref mut client = temp_queue[i];   
-                    //function call to serve request
-                    serve(client);
-                    //decreasing thread_count by one (as request got processed in above function call)  
-                    let mut thread_count = thread_count.lock().unwrap();
-                    *thread_count -=1;
-                });
-          }else{
-              break;
-          }
-        }     
-           continue;                     
+                for i in 0..len  {
+                let  ctr;                 
+                   {      //accessing mutually-exclusive values..
+                      let  mut queue_elem = queue.lock().unwrap();
+                      if queue_elem[i].fd==events.fd{
+                      //  println!("status updated");
+                      queue_elem[i].status=1;
+                      }else{continue;}
+                      let  thread_count = thread_count.lock().unwrap();
+                      ctr =*thread_count;
+                      //  println!(" thread_count:{} ",*thread_count);       
+                   }
+                if ctr < MAXTHREAD  {
+                       {   //increasing thread_count by 1 ,before spawing new thread
+                           let mut thread_count =  thread_count.lock().unwrap();
+                           *thread_count +=1;
+                          println!("value of thread_count:{} ",*thread_count);
+                       }
+                    //cloning varibles that are going to be shared among threads 
+                    let thread_count = thread_count.clone();
+                    let queue = queue.clone();  
+                    //new thread to serve client_request
+                    thread::spawn(move || {
+                           let mut temp_queue = queue.lock().unwrap();
+                           let ref mut client = temp_queue[i];   
+                           //function call to serve request
+                           serve(client);
+                           /*decreasing thread_count by one (as request got processed... 
+                             ...in above function call)*/  
+                          let mut thread_count = thread_count.lock().unwrap();
+                          *thread_count -=1;
+                        });
+                 }else{
+                        break;   }
+                 }     
+                     /*skip the below queue-processing this time(when some event is...
+                       ...observed on monitoring fd's) */
+                     continue;                     
            }
         }
         
-        //HERE BEGINS the QUEUE-PROCESSING
-          let  len ;
-           {      let  temp_queue = queue.lock().unwrap();
-                 len = temp_queue.len();     
-           }    
+      
+      /*HERE BEGINS the QUEUE-PROCESSING...(it starts only if there is no event on...
+        ... the monitoring list.) */
+             
          println!("length of queue:{}",len);
      
        for i in 0..len  {
@@ -234,7 +226,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                 {   //increasing thread_count by 1 ,before spawing new thread
                     let mut thread_count =  thread_count.lock().unwrap();
                     *thread_count +=1;
-                    // println!("value of thread_count:{} ",*thread_count);
+                    println!("value of thread_count:{} ",*thread_count);
                 }
               //cloning varibles that are going to be shared among threads 
               let thread_count = thread_count.clone();
@@ -245,7 +237,8 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                     let ref mut client = temp_queue[i];   
                     //function call to serve request
                     serve(client);
-                    //decreasing thread_count by one (as request got processed in above function call)  
+                    /*decreasing thread_count by one (as request got processed in...
+                      ... above function call) */  
                     let mut thread_count = thread_count.lock().unwrap();
                     *thread_count -=1;
                 });
@@ -258,18 +251,19 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
   }  
 }
 
-
-//to add structure functions to event_loop(to be execute -repeat number of times)
+//to add structure functions to event_loop(to be execute -(repeat) number of times)
 fn eventloop_add<T>(instance: T  , tx:Sender<ToServe<T>>,repeat: i32) {
-   //create instance of ToServe(structure) and send it on channel
+      //create instance of ToServe(structure) and send it on channel
       let temp_elem = ToServe{ fd:-1 , status:repeat,register:false,inner:instance};
       tx.send(temp_elem).unwrap();
       //to fire an event on of main socket (for adding above instance to PROCESSING)
       TcpStream::connect("127.0.0.1:6565").unwrap();     
 }
 
+/*to register some structure function to event-loop such that if any event occur on...
+  ...passed fd corresponding structure function should get executed*/
 fn eventloop_register<T>(fd:i32,instance: T,tx:Sender<ToServe<T>>){
- //create instance of ToServe(structure) and send it on channel
+      //create instance of ToServe(structure) and send it on channel
       let temp_elem = ToServe{ fd:fd , status:0,register:true,inner:instance};
       tx.send(temp_elem).unwrap();
       //to fire an event on of main socket (for adding above instance to PROCESSING)
@@ -278,16 +272,12 @@ fn eventloop_register<T>(fd:i32,instance: T,tx:Sender<ToServe<T>>){
 
  // function to serve  request (it serves requests from both internal files and sockets)..
  fn serve<T:Neccessary>(request: &mut ToServe<T>) {
-   
     //make thread to sleep for some msec's (just for simulation)
     thread::sleep_ms(2000);
     request.inner.initial();
-
-    // println!("worked fd:{}",request.fd);  
-    /*updating status of queue instance(to refelect that it had processed one time)...
-      ... one can also use counter to reflect number of times particular request(ToServe instance) got served*/
+    /*updating status of queue instance(to refelect that it had processed one more time)...
+      ... one can also use flag to reflect processing status of request*/
     request.status -=1;
-
  }
 
 
