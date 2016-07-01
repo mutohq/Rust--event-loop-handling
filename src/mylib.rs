@@ -12,9 +12,11 @@ use std::sync::{Arc,Mutex};
 
 //flags of libc
 pub const EPOLL_CTL_ADD: u32 = 1;
+pub const EPOLL_CTL_DEL: u32 = 2;
 pub const EPOLLIN:   u32 = 0x01;
 pub const EPOLLET: u32 = 0x80000000;
 pub const MAXEVENTS: i32 = 32 ; 
+//maximum threads that can run in parrallel
 pub const MAXTHREAD :i32 = 5;
 
 //external functions of library(libc) and other c files
@@ -37,7 +39,8 @@ pub struct  ToServe<T>{
      fd : i32,
      status: i32,
      register:bool,
-     inner: T 
+     inner: Option<T>,
+     call: Option<Box<FnMut(i32)+Send>> 
     }
 
 //create channel to interact with event_loop(Neccessary to call by every user)   
@@ -67,7 +70,7 @@ thread::sleep_ms(1000);
 fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
     let listener = TcpListener::bind("127.0.0.1:6565").unwrap();    
     let socket_fd = listener.as_raw_fd();
-    println!("socket_fd:{}",socket_fd);
+    // println!("socket_fd:{}",socket_fd);
     //to create epoll_instance  
     let epfd = unsafe{  epoll_create1(0)   }; 
     // println!("epfd:{}",epfd);
@@ -89,7 +92,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
 //      >=<      ...Here begins the EVENTLOOP...   >=<
     while true {
       let  n = unsafe { epoll_wait(epfd,events,MAXEVENTS,3000) };      
-       if n==0 {println!("timeout"); }
+      //  if n==0 {println!("timeout"); }
        if n==-1 {println!("some error occured"); continue;}
       //  println!("number of events:{}",n);
        let  len ;
@@ -102,7 +105,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
         if events.fd==socket_fd 
         {     //event on default socket_fd (represents something to add to queue)
               // println!("Main Socket"); 
-              let instance = rx.recv().unwrap();
+              let  instance = rx.recv().unwrap();
               if instance.register{
                      //some fd to add to monitoring_list of epoll
                      let  event=&EpollEvent { events: EPOLLIN |EPOLLET,fd :instance.fd};
@@ -110,12 +113,22 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                      let  s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_ADD, instance.fd,event)  
                        };
               } 
-                 //adding received instance to processing queue  
-                 let mut temp_queue = queue.lock().unwrap();
-                 temp_queue.push(instance);  
-                //  println!("instance added");   
-              
-           }
+              let mut flag =false;
+              match instance.inner {
+                Some(ref inner) => flag= true,
+               None => {
+                        println!("no instance found in function call");
+                        let  s = unsafe {    epoll_ctl(epfd, EPOLL_CTL_DEL, instance.fd,event)  
+                                 };
+                       },   
+              }
+              if flag{
+                                   //adding received instance to processing queue  
+                                   let mut temp_queue = queue.lock().unwrap();
+                                   temp_queue.push(instance);  
+                                   //  println!("instance added");
+                    }
+   }
        else {
         //  println!("event on fd:{}",events.fd);
                 for i in 0..len  {
@@ -134,7 +147,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                        {   //increasing thread_count by 1 ,before spawing new thread
                            let mut thread_count =  thread_count.lock().unwrap();
                            *thread_count +=1;
-                          println!("value of thread_count:{} ",*thread_count);
+                          // println!("value of thread_count:{} ",*thread_count);
                        }
                     //cloning varibles that are going to be shared among threads 
                     let thread_count = thread_count.clone();
@@ -163,7 +176,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
       /*HERE BEGINS the QUEUE-PROCESSING...(it starts only if there is no event on...
         ... the monitoring list.) */
              
-         println!("length of queue:{}",len);
+        //  println!("length of queue:{}",len);
      
        for i in 0..len  {
         // println!("INSIDE QUEUE PROCESSING");
@@ -184,7 +197,7 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
                 {   //increasing thread_count by 1 ,before spawing new thread
                     let mut thread_count =  thread_count.lock().unwrap();
                     *thread_count +=1;
-                    println!("value of thread_count:{} ",*thread_count);
+                    // println!("value of thread_count:{} ",*thread_count);
                 }
               //cloning varibles that are going to be shared among threads 
               let thread_count = thread_count.clone();
@@ -209,10 +222,10 @@ fn event_loop<T:Send + Sync +'static+Neccessary>(rx: Receiver<ToServe<T>>) {
   }  
 }
 
-//to add structure functions to event_loop(to be execute -(repeat) number of times)
+//to add structure's initial function to event_loop(to be execute -(repeat) number of times)
 pub fn eventloop_add<T>(instance: T  , tx:Sender<ToServe<T>>,repeat: i32) {
       //create instance of ToServe(structure) and send it on channel
-      let temp_elem = ToServe{ fd:-1 , status:repeat,register:false,inner:instance};
+      let temp_elem = ToServe{ fd:-1 , status:repeat,register:false,inner:Some(instance),call:None};
       tx.send(temp_elem).unwrap();
       //to fire an event on of main socket (for adding above instance to PROCESSING)
       TcpStream::connect("127.0.0.1:6565").unwrap();     
@@ -222,18 +235,35 @@ pub fn eventloop_add<T>(instance: T  , tx:Sender<ToServe<T>>,repeat: i32) {
   ...passed fd corresponding structure function should get executed*/
 pub fn eventloop_register<T>(fd:i32,instance: T,tx:Sender<ToServe<T>>){
       //create instance of ToServe(structure) and send it on channel
-      let temp_elem = ToServe{ fd:fd , status:0,register:true,inner:instance};
+      let temp_elem = ToServe{ fd:fd , status:0,register:true,inner:Some(instance),call:None};
       tx.send(temp_elem).unwrap();
       //to fire an event on of main socket (for adding above instance to PROCESSING)
       TcpStream::connect("127.0.0.1:6565").unwrap(); 
 }
+
+//function to add general functions in queue 
+fn add_callback<T:Send>(f:Box<FnMut(i32)>,tx:Sender<ToServe<T>>){
+        //create instance of ToServe(structure) and send it on channel
+      let temp_elem = ToServe{ fd: -1, status:1,register:false,inner:None,call: Some(f)};
+      tx.send(temp_elem).unwrap();
+      //to fire an event on of main socket (for adding above instance to PROCESSING)
+      TcpStream::connect("127.0.0.1:6565").unwrap(); 
+}
+
 
  // function to serve  request (it serves requests from both internal files and sockets)..
  fn serve<T:Neccessary>(request: &mut ToServe<T>) {
     //make thread to sleep for some msec's (just for simulation)
      
     thread::sleep_ms(2000);
-    request.inner.initial();
+    match request.inner {
+      Some(ref inner) =>    inner.initial(),
+      None => { }, 
+    }
+    match request.call {
+      Some(ref call) =>    call(32),
+      None => { }, 
+    }
     /*updating status of queue instance(to refelect that it had processed one more time)...
       ... one can also use flag to reflect processing status of request*/
     request.status -=1;

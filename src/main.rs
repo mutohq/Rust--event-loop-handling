@@ -23,8 +23,12 @@ impl mylib::Neccessary for Cars {
 impl mylib::Neccessary for Bikes {
      fn initial(&self) {
        println!("working on  {} ({})",self.name,self.num);
+       callback();
      }  
 }
+  fn callback(){
+   println!("DURING CALLBACK");
+  }  
 
 fn main(){
 let (tx,rx)= mylib::make_channel();
